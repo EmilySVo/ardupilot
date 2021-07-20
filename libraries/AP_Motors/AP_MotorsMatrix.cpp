@@ -317,14 +317,14 @@ void AP_MotorsMatrix::output_armed_stabilizing()
     }
 
     // add scaled roll, pitch, constrained yaw and throttle for each motor
+    const float throttle_thrust_best_plus_adj = throttle_thrust_best_rpy + thr_adj;
     for (i = 0; i < AP_MOTORS_MAX_NUM_MOTORS; i++) {
         if (motor_enabled[i]) {
-            _thrust_rpyt_out[i] = throttle_thrust_best_rpy + thr_adj + (rpy_scale * _thrust_rpyt_out[i]);
+            _thrust_rpyt_out[i] = (throttle_thrust_best_plus_adj*_throttle_factor[i]) + (rpy_scale * _thrust_rpyt_out[i]);
         }
     }
-
+    
     // determine throttle thrust for harmonic notch
-    const float throttle_thrust_best_plus_adj = throttle_thrust_best_rpy + thr_adj;
     // compensation_gain can never be zero
     _throttle_out = throttle_thrust_best_plus_adj / compensation_gain;
 
@@ -431,7 +431,7 @@ bool AP_MotorsMatrix::output_test_num(uint8_t output_channel, int16_t pwm)
 }
 
 // add_motor
-void AP_MotorsMatrix::add_motor_raw(int8_t motor_num, float roll_fac, float pitch_fac, float yaw_fac, uint8_t testing_order)
+void AP_MotorsMatrix::add_motor_raw(int8_t motor_num, float roll_fac, float pitch_fac, float yaw_fac, uint8_t testing_order, float throttle_factor)
 {
     // ensure valid motor number is provided
     if (motor_num >= 0 && motor_num < AP_MOTORS_MAX_NUM_MOTORS) {
@@ -445,6 +445,7 @@ void AP_MotorsMatrix::add_motor_raw(int8_t motor_num, float roll_fac, float pitc
         _roll_factor[motor_num] = roll_fac;
         _pitch_factor[motor_num] = pitch_fac;
         _yaw_factor[motor_num] = yaw_fac;
+        _throttle_factor[motor_num] = throttle_factor;
 
         // set order that motor appears in test
         _test_order[motor_num] = testing_order;
@@ -481,6 +482,7 @@ void AP_MotorsMatrix::remove_motor(int8_t motor_num)
         _roll_factor[motor_num] = 0;
         _pitch_factor[motor_num] = 0;
         _yaw_factor[motor_num] = 0;
+        _throttle_factor[motor_num] = 0;
     }
 }
 
@@ -836,6 +838,7 @@ void AP_MotorsMatrix::normalise_rpy_factors()
     float roll_fac = 0.0f;
     float pitch_fac = 0.0f;
     float yaw_fac = 0.0f;
+    float throttle_fac = 0.0f;
 
     // find maximum roll, pitch and yaw factors
     for (uint8_t i = 0; i < AP_MOTORS_MAX_NUM_MOTORS; i++) {
@@ -849,6 +852,19 @@ void AP_MotorsMatrix::normalise_rpy_factors()
             if (yaw_fac < fabsf(_yaw_factor[i])) {
                 yaw_fac = fabsf(_yaw_factor[i]);
             }
+                //original line commented out for custom mix
+            //throttle_fac = MAX(throttle_fac,MAX(0.0f,_throttle_factor[i]));
+            //For custom mixer, setting motors 3 and 6
+            float custom_fac = 1.5;
+            if (i == AP_MOTORS_MOT_1 || i == AP_MOTORS_MOT_2){ //specify motors changed
+                    _throttle_factor[i] = custom_fac;
+                    throttle_fac = custom_fac;
+                }
+            else {
+                //_throttle_factor[i] = 0.75;
+                _throttle_factor[i] = (6-(custom_fac*2))/4;
+            }
+                 
         }
     }
 
@@ -862,7 +878,10 @@ void AP_MotorsMatrix::normalise_rpy_factors()
                 _pitch_factor[i] = 0.5f * _pitch_factor[i] / pitch_fac;
             }
             if (!is_zero(yaw_fac)) {
-                _yaw_factor[i] = 0.5f * _yaw_factor[i] / yaw_fac;
+                _yaw_factor[i] = 0.5f * _yaw_factor[i] / yaw_fac; 
+            }
+            if (!is_zero(throttle_fac)) {
+                _throttle_factor[i] = MAX(0.0f,_throttle_factor[i] / throttle_fac);
             }
         }
     }
